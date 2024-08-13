@@ -67,8 +67,8 @@ __attribute__((section(".UsbxAppSection")))
 #elif defined ( __GNUC__ ) /* GNU Compiler */
 __attribute__((section(".UsbxAppSection")))
 #endif
-uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
-uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
+uint8_t UserRxBuffer[APP_RX_DATA_SIZE];
+uint8_t UserTxBuffer[APP_TX_DATA_SIZE];
 
 uint32_t UserTxBufPtrIn;
 uint32_t UserTxBufPtrOut;
@@ -155,7 +155,7 @@ VOID USBD_CDC_ACM_Activate(VOID *cdc_acm_instance)
   }
 
   /* Receive an amount of data in interrupt mode */
-  if (HAL_UART_Receive_IT(uart_handler, (uint8_t *)UserTxBufferFS, 1) != HAL_OK)
+  if (HAL_UART_Receive_IT(uart_handler, (uint8_t *)UserTxBuffer, 1) != HAL_OK)
   {
     /* Transfer error in reception process */
     Error_Handler();
@@ -290,12 +290,12 @@ VOID usbx_cdc_acm_read_thread_entry(ULONG thread_input)
 #endif /* UX_DEVICE_CLASS_CDC_ACM_TRANSMISSION_DISABLE */
 
       /* Read the received data in blocking mode */
-      ux_device_class_cdc_acm_read(cdc_acm, (UCHAR *)UserRxBufferFS, 64,
+      ux_device_class_cdc_acm_read(cdc_acm, (UCHAR *)UserRxBuffer, 64,
                                    &actual_length);
       if (actual_length != 0)
       {
         /* Send the data via UART */
-        if (HAL_UART_Transmit_DMA(uart_handler, (uint8_t *)UserRxBufferFS, actual_length) != HAL_OK)
+        if (HAL_UART_Transmit_DMA(uart_handler, (uint8_t *)UserRxBuffer, actual_length) != HAL_OK)
         {
           Error_Handler();
         }
@@ -367,7 +367,7 @@ VOID usbx_cdc_acm_write_thread_entry(ULONG thread_input)
       buffptr = UserTxBufPtrOut;
 
       /* Send data over the class cdc_acm_write */
-      if (ux_device_class_cdc_acm_write(cdc_acm, (UCHAR *)(&UserTxBufferFS[buffptr]),
+      if (ux_device_class_cdc_acm_write(cdc_acm, (UCHAR *)(&UserTxBuffer[buffptr]),
                                         buffsize, &actual_length) == UX_SUCCESS)
       {
         /* Increment the UserTxBufPtrOut pointer */
@@ -420,7 +420,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
   }
 
   /* Start another reception: provide the buffer pointer with offset and the buffer size */
-  if (HAL_UART_Receive_IT(uart_handler, (uint8_t *)UserTxBufferFS + UserTxBufPtrIn, 1) != HAL_OK)
+  if (HAL_UART_Receive_IT(uart_handler, (uint8_t *)UserTxBuffer + UserTxBufPtrIn, 1) != HAL_OK)
   {
     /* Transfer error in reception process */
     Error_Handler();
@@ -563,7 +563,7 @@ static VOID USBD_CDC_VCP_Config(UX_SLAVE_CLASS_CDC_ACM_LINE_CODING_PARAMETER
   }
 
   /* Start reception: provide the buffer pointer with offset and the buffer size */
-  HAL_UART_Receive_IT(uart_handler, (uint8_t *)(UserTxBufferFS + UserTxBufPtrIn), 1);
+  HAL_UART_Receive_IT(uart_handler, (uint8_t *)(UserTxBuffer + UserTxBufPtrIn), 1);
 }
 
 /* USER CODE END 1 */

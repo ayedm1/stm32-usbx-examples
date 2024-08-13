@@ -1,0 +1,4 @@
+[ProjectFiles]
+HeaderPath=../Stream
+[Groups]
+Doc=../README.md;
