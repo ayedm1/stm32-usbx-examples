@@ -50,3 +50,18 @@
 	path = Drivers/BSP/Components/mfxstm32l152
 	url = https://github.com/STMicroelectronics/stm32-mfxstm32l152.git
 	branch = main
+[submodule "Drivers/STM32H7RSxx_HAL_Driver"]
+	path = Drivers/STM32H7RSxx_HAL_Driver
+	url = https://github.com/STMicroelectronics/stm32h7rsxx_hal_driver.git
+[submodule "Drivers/CMSIS/Device/ST/STM32H7RSxx"]
+	path = Drivers/CMSIS/Device/ST/STM32H7RSxx
+	url = https://github.com/STMicroelectronics/cmsis_device_h7rs.git
+[submodule "Drivers/BSP/Components/Common"]
+	path = Drivers/BSP/Components/Common
+	url = https://github.com/STMicroelectronics/stm32-bsp-common.git
+[submodule "Drivers/BSP/STM32H7S78-DK"]
+	path = Drivers/BSP/STM32H7S78-DK
+	url = https://github.com/STMicroelectronics/stm32h7s78-dk-bsp.git
+[submodule "Drivers/BSP/Components/wm8904"]
+	path = Drivers/BSP/Components/wm8904
+	url = https://github.com/STMicroelectronics/stm32-wm8904.git
