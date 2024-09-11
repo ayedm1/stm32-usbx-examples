@@ -43,8 +43,16 @@
 #define APP_TX_DATA_SIZE   2048
 
 /* Rx/TX flag */
+#define NO_NEW_DATA               0x00
 #define RX_NEW_RECEIVED_DATA      0x01
 #define TX_NEW_TRANSMITTED_DATA   0x02
+
+#define CDC_ACM_READ_STATE_WAIT      0x00
+#define CDC_ACM_READ_STATE_TX_START  0x01
+#define CDC_ACM_READ_STATE_TX_WAIT   0x02
+
+#define CDC_ACM_WRITE_STATE_WAIT      0x00
+#define CDC_ACM_WRITE_STATE_RX_START  0x001
 
 /* Data length for vcp */
 #define VCP_WORDLENGTH8  8
@@ -73,8 +81,11 @@ uint8_t UserTxBuffer[APP_TX_DATA_SIZE];
 uint32_t UserTxBufPtrIn;
 uint32_t UserTxBufPtrOut;
 
+static UINT read_state = CDC_ACM_READ_STATE_WAIT;
+static UINT write_state = CDC_ACM_WRITE_STATE_WAIT;
+__IO ULONG EventFlag = NO_NEW_DATA;
+
 UART_HandleTypeDef *uart_handler;
-extern TX_EVENT_FLAGS_GROUP EventFlag;
 
 UX_SLAVE_CLASS_CDC_ACM_LINE_CODING_PARAMETER CDC_VCP_LineCoding =
 {
@@ -262,123 +273,161 @@ VOID USBD_CDC_ACM_ParameterChange(VOID *cdc_acm_instance)
 /* USER CODE BEGIN 1 */
 
 /**
-  * @brief  Function implementing usbx_cdc_acm_thread_entry.
-  * @param  thread_input: Not used
+  * @brief  USBX_DEVICE_CDC_ACM_Read_Task
+  *         Function implementing USBX_DEVICE_CDC_ACM_Read_Task.
+  * @param  none
   * @retval none
   */
-VOID usbx_cdc_acm_read_thread_entry(ULONG thread_input)
+VOID USBX_DEVICE_CDC_ACM_Read_Task(VOID)
 {
-  ULONG actual_length;
-  ULONG senddataflag = 0;
   UX_SLAVE_DEVICE *device;
-
-  UX_PARAMETER_NOT_USED(thread_input);
+  UINT status;
+  static ULONG actual_length;
 
   device = &_ux_system_slave->ux_system_slave_device;
 
-  while (1)
+  /* Check if device is configured */
+  if ((device->ux_slave_device_state == UX_DEVICE_CONFIGURED) && (cdc_acm != UX_NULL))
   {
-    /* Check if device is configured */
-    if ((device->ux_slave_device_state == UX_DEVICE_CONFIGURED) && (cdc_acm != UX_NULL))
+
+    switch (read_state)
     {
+      case CDC_ACM_READ_STATE_WAIT:
 
-#ifndef UX_DEVICE_CLASS_CDC_ACM_TRANSMISSION_DISABLE
+        /* Read the received data */
+        if (ux_device_class_cdc_acm_read_run(cdc_acm,
+                                             (UCHAR *)UserRxBuffer, 64,
+                                             &actual_length) == UX_STATE_NEXT)
+        {
+          if (actual_length != 0)
+          {
+            /* Update cdc acm read state machine */
+            read_state = CDC_ACM_READ_STATE_TX_START;
+          }
+        }
 
-      /* Set transmission_status to UX_FALSE for the first time */
-      cdc_acm -> ux_slave_class_cdc_acm_transmission_status = UX_FALSE;
+        break;
 
-#endif /* UX_DEVICE_CLASS_CDC_ACM_TRANSMISSION_DISABLE */
+      case CDC_ACM_READ_STATE_TX_START:
 
-      /* Read the received data in blocking mode */
-      ux_device_class_cdc_acm_read(cdc_acm, (UCHAR *)UserRxBuffer, 64,
-                                   &actual_length);
-      if (actual_length != 0)
-      {
         /* Send the data via UART */
-        if (HAL_UART_Transmit_DMA(uart_handler, (uint8_t *)UserRxBuffer, actual_length) != HAL_OK)
+        status = HAL_UART_Transmit_DMA(uart_handler, (uint8_t *)UserRxBuffer,
+                                       actual_length);
+        if (status == HAL_OK)
         {
+          /* Update cdc acm read state machine */
+          read_state = CDC_ACM_READ_STATE_TX_WAIT;
+        }
+        else if (status == HAL_BUSY)
+        {
+          break;
+        }
+        else if (status != HAL_OK)
+        {
+          /* Transfer error in reception process */
           Error_Handler();
         }
 
-        /* Wait until the requested flag TX_NEW_TRANSMITTED_DATA is received */
-        if (tx_event_flags_get(&EventFlag, TX_NEW_TRANSMITTED_DATA, TX_OR_CLEAR,
-                               &senddataflag, TX_WAIT_FOREVER) != TX_SUCCESS)
+        break;
+
+      case CDC_ACM_READ_STATE_TX_WAIT:
+
+        if (EventFlag & TX_NEW_TRANSMITTED_DATA)
         {
-          Error_Handler();
+          EventFlag &= ~TX_NEW_TRANSMITTED_DATA;
         }
-      }
-      else
-      {
-        /* Sleep thread for 10ms if no data received */
-        tx_thread_sleep(MS_TO_TICK(10));
-      }
-    }
-    else
-    {
-      /* Sleep thread for 10ms */
-      tx_thread_sleep(MS_TO_TICK(10));
+
+        /* Update cdc acm read state machine */
+        read_state = CDC_ACM_READ_STATE_WAIT;
+
+        break;
+
+      default:
+        break;
     }
   }
 }
 
 /**
-  * @brief  Function implementing usbx_cdc_acm_write_thread_entry.
+  * @brief  USBX_DEVICE_CDC_ACM_Write_Task
+  *         Function implementing USBX_DEVICE_CDC_ACM_Write_Task.
   * @param  thread_input: Not used
   * @retval none
   */
-VOID usbx_cdc_acm_write_thread_entry(ULONG thread_input)
+VOID USBX_DEVICE_CDC_ACM_Write_Task(VOID)
 {
-  ULONG receivedataflag = 0;
+  UX_SLAVE_DEVICE *device;
   ULONG actual_length, buffptr, buffsize;
 
-  UX_PARAMETER_NOT_USED(thread_input);
+  device = &_ux_system_slave->ux_system_slave_device;
 
-  while (1)
+  /* Check if device is con figured */
+  if ((device->ux_slave_device_state == UX_DEVICE_CONFIGURED) && (cdc_acm != UX_NULL))
   {
-    /* Wait until the requested flag RX_NEW_RECEIVED_DATA is received */
-    if (tx_event_flags_get(&EventFlag, RX_NEW_RECEIVED_DATA, TX_OR_CLEAR,
-                           &receivedataflag, TX_WAIT_FOREVER) != TX_SUCCESS)
+
+    switch (write_state)
     {
-      Error_Handler();
-    }
 
-#ifndef UX_DEVICE_CLASS_CDC_ACM_TRANSMISSION_DISABLE
+      case CDC_ACM_WRITE_STATE_WAIT:
 
-    /* Set transmission_status to UX_FALSE for the first time */
-    cdc_acm -> ux_slave_class_cdc_acm_transmission_status = UX_FALSE;
-
-#endif
-
-    /* Check if there is a new data to send */
-    if (UserTxBufPtrOut != UserTxBufPtrIn)
-    {
-      /* Check buffer overflow and Rollback */
-      if (UserTxBufPtrOut > UserTxBufPtrIn)
-      {
-        buffsize = APP_RX_DATA_SIZE - UserTxBufPtrOut;
-      }
-      else
-      {
-        /* Calculate data size */
-        buffsize = UserTxBufPtrIn - UserTxBufPtrOut;
-      }
-
-      /* Copy UserTxBufPtrOut in buffptr */
-      buffptr = UserTxBufPtrOut;
-
-      /* Send data over the class cdc_acm_write */
-      if (ux_device_class_cdc_acm_write(cdc_acm, (UCHAR *)(&UserTxBuffer[buffptr]),
-                                        buffsize, &actual_length) == UX_SUCCESS)
-      {
-        /* Increment the UserTxBufPtrOut pointer */
-        UserTxBufPtrOut += buffsize;
-
-        /* Rollback UserTxBufPtrOut if it equal to APP_TX_DATA_SIZE */
-        if (UserTxBufPtrOut == APP_TX_DATA_SIZE)
+        if (EventFlag & RX_NEW_RECEIVED_DATA)
         {
-          UserTxBufPtrOut = 0;
+          /* Reset flag */
+          EventFlag &= ~RX_NEW_RECEIVED_DATA;
+
+          /* Check if there is a new data to send */
+          if (UserTxBufPtrOut != UserTxBufPtrIn)
+          {
+            /* Check buffer overflow and Rollback */
+            if (UserTxBufPtrOut > UserTxBufPtrIn)
+            {
+              buffsize = APP_RX_DATA_SIZE - UserTxBufPtrOut;
+            }
+            else
+            {
+              /* Calculate data size */
+              buffsize = UserTxBufPtrIn - UserTxBufPtrOut;
+            }
+
+            /* Copy UserTxBufPtrOut in buffptr */
+            buffptr = UserTxBufPtrOut;
+
+            /* Send data over the class cdc_acm_write */
+            if (ux_device_class_cdc_acm_write_run(cdc_acm,
+                                                  (UCHAR *)(&UserTxBuffer[buffptr]),
+                                                  buffsize, &actual_length) == UX_STATE_WAIT)
+            {
+              /* Update cdc acm write state machine */
+              write_state = CDC_ACM_WRITE_STATE_RX_START;
+            }
+
+          }
         }
-      }
+
+        break;
+
+      case CDC_ACM_WRITE_STATE_RX_START:
+
+        /* Check if dataset is transmitted */
+        if (ux_device_class_cdc_acm_write_run(cdc_acm, UX_NULL, 0, &actual_length) == UX_STATE_NEXT)
+        {
+          /* Increment the UserTxBufPtrOut pointer */
+          UserTxBufPtrOut += actual_length;
+
+          /* Rollback UserTxBufPtrOut if it equal to APP_TX_DATA_SIZE */
+          if (UserTxBufPtrOut == APP_TX_DATA_SIZE)
+          {
+            UserTxBufPtrOut = 0;
+          }
+
+          /* Update cdc acm write state machine */
+          write_state = CDC_ACM_WRITE_STATE_WAIT;
+        }
+
+        break;
+
+      default:
+        break;
     }
   }
 }
@@ -391,10 +440,7 @@ VOID usbx_cdc_acm_write_thread_entry(ULONG thread_input)
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
   /* Set TX_NEW_TRANSMITTED_DATA flag */
-  if (tx_event_flags_set(&EventFlag, TX_NEW_TRANSMITTED_DATA, TX_OR) != TX_SUCCESS)
-  {
-    Error_Handler();
-  }
+  EventFlag |= TX_NEW_TRANSMITTED_DATA;
 }
 
 /**
@@ -405,10 +451,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   /* Set RX_NEW_RECEIVED_DATA flag */
-  if (tx_event_flags_set(&EventFlag, RX_NEW_RECEIVED_DATA, TX_OR) != TX_SUCCESS)
-  {
-    Error_Handler();
-  }
+  EventFlag |= RX_NEW_RECEIVED_DATA;
 
   /* Increment the UserTxBufPtrIn pointer */
   UserTxBufPtrIn++;
