@@ -1,0 +1,8 @@
+[CortexM7:ProjectFiles]
+HeaderPath=..\..\..\..\..\..\Drivers\BSP\STM32H747I-DISCO
+[CortexM7:Groups]
+Drivers/BSP/STM32H747I-DISCO=../../../../../../Drivers/BSP/STM32H747I-DISCO/stm32h747i_discovery.c;
+Doc=../README.md;
+
+[CortexM4:Groups]
+Doc=../README.md;
